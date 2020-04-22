@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  xmlns:tools="http://schemas.android.com/tools"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:focusable="true"
+  android:focusableInTouchMode="true"
+  android:orientation="vertical"
+  tools:context=".MainActivity">
+
+  <com.dylanc.materialedittext.MaterialEditText
+    android:id="@+id/edt"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:hint="UserName"/>
+
+  <com.dylanc.materialedittext.MaterialEditText
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="8dp"
+    android:inputType="textPassword"
+    android:hint="Password"/>
+
+<!--  <com.dylanc.materialedittext.MaterialEditText-->
+<!--    android:layout_width="match_parent"-->
+<!--    android:layout_height="wrap_content"-->
+<!--    android:layout_marginTop="8dp"-->
+<!--    android:inputType="textPassword"-->
+<!--    android:hint="Code"/>-->
+
+</LinearLayout>
