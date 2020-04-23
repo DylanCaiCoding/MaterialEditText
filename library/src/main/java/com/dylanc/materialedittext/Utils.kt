@@ -39,3 +39,7 @@ fun toggleSoftInput(view: View) {
   imm?.toggleSoftInput(0, 0)
 }
 
+val Context.accentColor: Int
+  get() = TypedValue().apply {
+    theme.resolveAttribute(R.attr.colorAccent, this, true)
+  }.data

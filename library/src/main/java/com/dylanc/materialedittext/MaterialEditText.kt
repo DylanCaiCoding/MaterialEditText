@@ -17,7 +17,7 @@ import kotlin.properties.Delegates
  * @author Dylan Cai
  * @since 2019/10/29
  */
-class MaterialEditText(context: Context?, attrs: AttributeSet?) :
+class MaterialEditText(context: Context, attrs: AttributeSet) :
   AppCompatEditText(context, attrs) {
 
   companion object {
@@ -77,7 +77,7 @@ class MaterialEditText(context: Context?, attrs: AttributeSet?) :
       (paddingRight + textMargin).toInt(),
       (paddingBottom + lineMaxShakeOffset).toInt()
     )
-    lineAccentColor = getAccentColor()
+    lineAccentColor = context.accentColor
 
 
     val showLineAnimator =
@@ -221,7 +221,6 @@ class MaterialEditText(context: Context?, attrs: AttributeSet?) :
       paint.color = lineAccentColor
       if (showLineFraction <= 1 && showLineFraction > 0) {
         if (showLineFraction == 1f) {
-          Log.d("test","id: $id, $showLineFraction , $hideLineFraction")
           if (hideLineFraction > 0) {
             canvas.drawLine(
               textMargin + lineLength * hideLineFraction, lineY,
@@ -253,11 +252,4 @@ class MaterialEditText(context: Context?, attrs: AttributeSet?) :
       true
     }
   }
-
-  private fun getAccentColor(): Int {
-    val value = TypedValue()
-    context.theme.resolveAttribute(R.attr.colorAccent, value, true)
-    return value.data
-  }
-
 }
