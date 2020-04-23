@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.util.AttributeSet
+import android.util.Log
 import android.util.TypedValue
 import android.view.animation.BounceInterpolator
 import androidx.appcompat.widget.AppCompatEditText
@@ -81,7 +82,7 @@ class MaterialEditText(context: Context?, attrs: AttributeSet?) :
 
     val showLineAnimator =
       ObjectAnimator.ofFloat(this@MaterialEditText, "showLineFraction", 1f)
-        .apply { duration = 500 }
+        .apply { duration = 500}
     val hideLineAnimator =
       ObjectAnimator.ofFloat(this@MaterialEditText, "hideLineFraction", 1f)
         .apply { duration = 500 }
@@ -112,15 +113,13 @@ class MaterialEditText(context: Context?, attrs: AttributeSet?) :
         playSequentially(showLineAnimator, pullLineAnimator, riseAnimatorSet)
         addListener(object : AnimatorListenerAdapter() {
           override fun onAnimationStart(p0: Animator?) {
-            isEnabled = false
-//            isCursorVisible = false
+            isCursorVisible = false
             animationListeners.remove(::onFocusedAnimPlaying)
             focusedAnimPlaying = true
           }
 
           override fun onAnimationEnd(p0: Animator?) {
-            isEnabled = true
-//            isCursorVisible = true
+            isCursorVisible = true
             animationListeners.add(::onFocusedAnimPlaying)
             focusedAnimPlaying = false
             showKeyboard()
@@ -138,11 +137,9 @@ class MaterialEditText(context: Context?, attrs: AttributeSet?) :
         playSequentially(hideLineAnimator, textDropAnimator)
         addListener(object : AnimatorListenerAdapter() {
           override fun onAnimationStart(p0: Animator?) {
-//            isEnabled = false
           }
 
           override fun onAnimationEnd(p0: Animator?) {
-//            isEnabled = true
             textRiseFraction = 0f
             showLineFraction = 0f
             hideLineFraction = 0f
@@ -154,13 +151,14 @@ class MaterialEditText(context: Context?, attrs: AttributeSet?) :
         if (text.toString().isEmpty()) {
           focusedAnimatorSet.start()
         } else {
-//          showLineAnimator.start()
+          hideLineFraction = 0f
+          showLineAnimator.start()
         }
       } else if (!focus) {
         if (text.toString().isEmpty()) {
           loseFocusAnimatorSet.start()
         } else {
-//          hideLineAnimator.start()
+          hideLineAnimator.start()
         }
       }
     }
@@ -223,6 +221,7 @@ class MaterialEditText(context: Context?, attrs: AttributeSet?) :
       paint.color = lineAccentColor
       if (showLineFraction <= 1 && showLineFraction > 0) {
         if (showLineFraction == 1f) {
+          Log.d("test","id: $id, $showLineFraction , $hideLineFraction")
           if (hideLineFraction > 0) {
             canvas.drawLine(
               textMargin + lineLength * hideLineFraction, lineY,
