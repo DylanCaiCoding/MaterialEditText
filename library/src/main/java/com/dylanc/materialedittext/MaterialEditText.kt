@@ -1,37 +1,28 @@
 package com.dylanc.materialedittext
 
-import android.animation.*
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.text.InputFilter
+import android.text.InputType
+import android.text.TextUtils
 import android.util.AttributeSet
-import android.util.Log
-import android.util.TypedValue
+import android.view.View
 import android.view.animation.BounceInterpolator
 import androidx.appcompat.widget.AppCompatEditText
-import kotlin.properties.Delegates
 
-/**
- * @author Dylan Cai
- * @since 2019/10/29
- */
 class MaterialEditText(context: Context, attrs: AttributeSet) :
-  AppCompatEditText(context, attrs) {
-
-  companion object {
-    private var focusedAnimPlaying: Boolean by Delegates.observable(false,
-      { _, _, new ->
-        for (listener in animationListeners) {
-          listener.invoke(new)
-        }
-      })
-    private val animationListeners = mutableListOf<(playing: Boolean) -> Unit>()
-  }
+  AppCompatEditText(context, attrs), View.OnFocusChangeListener {
 
   private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
   private val path = Path()
+
   private val textMargin = 8.dp
   private val smallTextSize = 12.dp
   private val smallTextBaseLine = 22.dp
@@ -40,22 +31,24 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
   private var lineAccentColor = 0
   private val lineMaxShakeOffset = 15.dp
   private val lineOffset = 12.dp
-  private var showLineFraction = 0f
-    set(value) {
-      field = value
-      invalidate()
-    }
-  private var hideLineFraction = 0f
-    set(value) {
-      field = value
-      invalidate()
-    }
+  private var expandState = ExpandState.NORMAL
+  private var realInputType: Int
+
+  private lateinit var highlightAnimator: ObjectAnimator
+  private lateinit var pullLineAnimator: ObjectAnimator
+  private lateinit var textFloatAnimator: ObjectAnimator
+  private lateinit var focusedAnimatorSet: AnimatorSet
+  private lateinit var riseAnimatorSet: AnimatorSet
+  private lateinit var loseFocusAnimatorSet: AnimatorSet
+
+  private val nonInputFilter = InputFilter { _, _, _, _, _, _ -> "" }
+
   private var textRiseFraction = 0f
     set(value) {
       field = value
       invalidate()
     }
-  private var pullDegree = 0f
+  private var linePullDegree = 0f
     set(value) {
       field = value
       invalidate()
@@ -65,7 +58,11 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
       field = value
       invalidate()
     }
-  private var rise = false
+  private var showLineFraction = 0f
+    set(value) {
+      field = value
+      invalidate()
+    }
 
   init {
     paint.strokeJoin = Paint.Join.ROUND
@@ -78,178 +75,321 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
       (paddingBottom + lineMaxShakeOffset).toInt()
     )
     lineAccentColor = context.accentColor
+    onFocusChangeListener = this
+    realInputType = inputType
+    initAnimator()
+  }
 
-
-    val showLineAnimator =
-      ObjectAnimator.ofFloat(this@MaterialEditText, "showLineFraction", 1f)
-        .apply { duration = 500}
-    val hideLineAnimator =
-      ObjectAnimator.ofFloat(this@MaterialEditText, "hideLineFraction", 1f)
-        .apply { duration = 500 }
-    val pullLineAnimator = ObjectAnimator.ofFloat(this, "pullDegree", lineMaxShakeOffset * 2)
-    val riseAnimatorSet = AnimatorSet()
+  private fun initAnimator() {
+    highlightAnimator = ObjectAnimator.ofFloat(this, "showLineFraction", 1f)
       .apply {
-        val textRiseAnimator =
-          ObjectAnimator.ofFloat(this@MaterialEditText, "textRiseFraction", 1f)
-        val lineShakeAnimator =
-          ObjectAnimator.ofFloat(
-            this@MaterialEditText, "lineShakeOffset",
-            lineMaxShakeOffset * 2, (-20).dp, 0f, 8.dp, 0.dp
-          ).apply { duration = 400 }
-        playTogether(textRiseAnimator, lineShakeAnimator)
+        duration = 500
         addListener(object : AnimatorListenerAdapter() {
-          override fun onAnimationStart(p0: Animator?) {
-            rise = true
-          }
-
-          override fun onAnimationEnd(p0: Animator?) {
-            rise = false
-            pullDegree = 0f
+          override fun onAnimationStart(animation: Animator?) {
+            expandState = ExpandState.SHOW_HIGHLIGHT
           }
         })
       }
-    val focusedAnimatorSet = AnimatorSet()
+    pullLineAnimator = ObjectAnimator.ofFloat(this, "linePullDegree", lineMaxShakeOffset * 2)
       .apply {
-        playSequentially(showLineAnimator, pullLineAnimator, riseAnimatorSet)
         addListener(object : AnimatorListenerAdapter() {
-          override fun onAnimationStart(p0: Animator?) {
-            isCursorVisible = false
-            animationListeners.remove(::onFocusedAnimPlaying)
-            focusedAnimPlaying = true
-          }
-
-          override fun onAnimationEnd(p0: Animator?) {
-            isCursorVisible = true
-            animationListeners.add(::onFocusedAnimPlaying)
-            focusedAnimPlaying = false
-            showKeyboard()
+          override fun onAnimationStart(animation: Animator?) {
+            expandState = ExpandState.PULL_LINE
           }
         })
       }
-    val loseFocusAnimatorSet = AnimatorSet()
+    textFloatAnimator = ObjectAnimator.ofFloat(this, "textRiseFraction", 1f)
       .apply {
-        val textDropAnimator =
-          ObjectAnimator.ofFloat(this@MaterialEditText, "textRiseFraction", 1f, 0f)
-            .apply {
-              interpolator = BounceInterpolator()
-              duration = 600
-            }
-        playSequentially(hideLineAnimator, textDropAnimator)
         addListener(object : AnimatorListenerAdapter() {
-          override fun onAnimationStart(p0: Animator?) {
-          }
-
-          override fun onAnimationEnd(p0: Animator?) {
-            textRiseFraction = 0f
-            showLineFraction = 0f
-            hideLineFraction = 0f
+          override fun onAnimationStart(animation: Animator?) {
+            expandState = ExpandState.TEXT_RISE
           }
         })
       }
-    setOnFocusChangeListener { _, focus ->
-      if (focus) {
-        if (text.toString().isEmpty()) {
-          focusedAnimatorSet.start()
-        } else {
-          hideLineFraction = 0f
-          showLineAnimator.start()
+    val lineShakeAnimator =
+      ObjectAnimator.ofFloat(
+        this, "lineShakeOffset",
+        lineMaxShakeOffset * 2, (-20).dp, 0f, 8.dp, 0.dp
+      ).apply { duration = 400 }
+    riseAnimatorSet = AnimatorSet()
+      .apply {
+        playTogether(textFloatAnimator, lineShakeAnimator)
+      }
+    focusedAnimatorSet = AnimatorSet()
+      .apply {
+        playSequentially(highlightAnimator, pullLineAnimator, riseAnimatorSet)
+      }
+    loseFocusAnimatorSet = AnimatorSet()
+      .apply {
+        playSequentially(highlightAnimator, textFloatAnimator)
+        addListener(object : AnimatorListenerAdapter() {
+          override fun onAnimationEnd(animation: Animator?) {
+            super.onAnimationEnd(animation)
+            expandState = ExpandState.NORMAL
+          }
+        })
+      }
+  }
+
+  override fun onFocusChange(v: View?, hasFocus: Boolean) {
+    if (hasFocus) {
+      setEditable(true)
+      when (expandState) {
+        ExpandState.NORMAL -> {
+          if (!TextUtils.isEmpty(text)) {
+            highlightAnimator.setFloatValues(0f, 1f)
+            highlightAnimator.listeners?.clear()
+            highlightAnimator.addListener(object : AnimatorListenerAdapter() {
+              override fun onAnimationStart(animation: Animator?) {
+                expandState = ExpandState.SHOW_HIGHLIGHT
+              }
+
+              override fun onAnimationEnd(animation: Animator?) {
+                linePullDegree = 0f
+                expandState = ExpandState.EXPANDED
+              }
+            })
+            highlightAnimator.start()
+          } else {
+            setShowHighlightAnimator()
+            setTextRiseAnimator()
+            setEditable(false)
+            focusedAnimatorSet.listeners?.clear()
+            focusedAnimatorSet.addListener(object : AnimatorListenerAdapter() {
+              override fun onAnimationEnd(animation: Animator?) {
+                super.onAnimationEnd(animation)
+                linePullDegree = 0f
+                expandState = ExpandState.EXPANDED
+                setEditable(true)
+                showKeyboard()
+              }
+            })
+            focusedAnimatorSet.start()
+          }
         }
-      } else if (!focus) {
-        if (text.toString().isEmpty()) {
-          loseFocusAnimatorSet.start()
-        } else {
-          hideLineAnimator.start()
+        ExpandState.HIDE_HIGHLIGHT -> {
+          loseFocusAnimatorSet.end()
+          textRiseFraction = 1f
+          highlightAnimator.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator?) {
+              linePullDegree = 0f
+              expandState = ExpandState.EXPANDED
+            }
+          })
+          highlightAnimator.reverse()
+        }
+        ExpandState.TEXT_DROP -> {
+          loseFocusAnimatorSet.end()
+          textRiseFraction = textRiseFraction
+          AnimatorSet().apply {
+            textFloatAnimator.setFloatValues(textRiseFraction, 1f)
+            highlightAnimator.setFloatValues(1f, 0f)
+            playSequentially(textFloatAnimator, highlightAnimator)
+            addListener(object : AnimatorListenerAdapter() {
+              override fun onAnimationEnd(animation: Animator?) {
+                linePullDegree = 0f
+                expandState = ExpandState.EXPANDED
+              }
+            })
+          }.start()
+        }
+        else -> {
+        }
+      }
+
+    } else {
+      when (expandState) {
+        ExpandState.SHOW_HIGHLIGHT -> {
+          stopFocusedAnimation()
+          highlightAnimator.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator?) {
+              expandState = ExpandState.NORMAL
+            }
+          })
+          highlightAnimator.reverse()
+        }
+        ExpandState.PULL_LINE -> {
+          stopFocusedAnimation()
+          AnimatorSet().apply {
+            pullLineAnimator.setFloatValues(linePullDegree, 0f)
+            highlightAnimator.setFloatValues(1f, 0f)
+            playSequentially(pullLineAnimator, highlightAnimator)
+            addListener(object : AnimatorListenerAdapter() {
+              override fun onAnimationEnd(animation: Animator?) {
+                expandState = ExpandState.NORMAL
+              }
+            })
+          }.start()
+        }
+        ExpandState.TEXT_RISE -> {
+          textFloatAnimator.setFloatValues(0f, 1f, 0f)
+          textFloatAnimator.duration = 600
+          textFloatAnimator.interpolator = BounceInterpolator()
+          focusedAnimatorSet.listeners?.clear()
+          focusedAnimatorSet.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator?) {
+              textFloatAnimator.interpolator = null
+              expandState = ExpandState.NORMAL
+              linePullDegree = 0f
+            }
+          })
+        }
+        ExpandState.EXPANDED -> {
+          if (!TextUtils.isEmpty(text)) {
+            highlightAnimator.setFloatValues(0f, 1f)
+            highlightAnimator.listeners?.clear()
+            highlightAnimator.addListener(object : AnimatorListenerAdapter() {
+              override fun onAnimationStart(animation: Animator?) {
+                expandState = ExpandState.HIDE_HIGHLIGHT
+              }
+
+              override fun onAnimationEnd(animation: Animator?) {
+                expandState = ExpandState.NORMAL
+              }
+            })
+            highlightAnimator.start()
+          } else {
+            setHideHighlightAnimator()
+            setTextDropAnimator()
+            loseFocusAnimatorSet.start()
+          }
+        }
+        else -> {
         }
       }
     }
-    animationListeners.add(::onFocusedAnimPlaying)
   }
 
-  private fun onFocusedAnimPlaying(playing: Boolean) {
-    isEnabled = !playing
+  private fun stopFocusedAnimation() {
+    focusedAnimatorSet.listeners?.clear()
+    focusedAnimatorSet.cancel()
+    textRiseFraction = if (TextUtils.isEmpty(text)) {
+      0f
+    } else {
+      1f
+    }
+  }
+
+  private fun setShowHighlightAnimator() {
+    highlightAnimator.setFloatValues(0f, 1f)
+    highlightAnimator.listeners?.clear()
+    highlightAnimator.addListener(object : AnimatorListenerAdapter() {
+      override fun onAnimationStart(animation: Animator?) {
+        expandState = ExpandState.SHOW_HIGHLIGHT
+      }
+    })
+  }
+
+  private fun setHideHighlightAnimator() {
+    highlightAnimator.setFloatValues(0f, 1f)
+    highlightAnimator.listeners?.clear()
+    highlightAnimator.addListener(object : AnimatorListenerAdapter() {
+      override fun onAnimationStart(animation: Animator?) {
+        expandState = ExpandState.HIDE_HIGHLIGHT
+      }
+    })
+  }
+
+  private fun setTextRiseAnimator() {
+    textFloatAnimator.setFloatValues(0f, 1f)
+    textFloatAnimator.duration = 300
+    textFloatAnimator.listeners?.clear()
+    textFloatAnimator.interpolator = null
+    textFloatAnimator.addListener(object : AnimatorListenerAdapter() {
+      override fun onAnimationStart(animation: Animator?) {
+        expandState = ExpandState.TEXT_RISE
+      }
+    })
+  }
+
+  private fun setTextDropAnimator() {
+    textFloatAnimator.setFloatValues(1f, 0f)
+    textFloatAnimator.listeners?.clear()
+    textFloatAnimator.addListener(object : AnimatorListenerAdapter() {
+      override fun onAnimationStart(animation: Animator?) {
+        expandState = ExpandState.TEXT_DROP
+      }
+    })
   }
 
   override fun onDraw(canvas: Canvas?) {
     super.onDraw(canvas)
-    if (canvas != null) {
-      // 绘制 hint 文字
-      paint.color = smallTextColor
-      paint.style = Paint.Style.FILL
-      paint.textSize = textSize - textRiseFraction * (textSize - smallTextSize)
-      val textControlPotionY = when {
-        rise -> baseline + pullDegree * (1 - textRiseFraction)
-        else -> baseline + pullDegree
-      }
-      path.reset()
-      path.moveTo(textMargin, baseline.toFloat())
-      path.quadTo(
-        width / 2f,
-        textControlPotionY,
-        (width - paddingRight).toFloat(),
-        baseline.toFloat()
-      )
-      canvas.drawTextOnPath(
-        hint.toString(),
-        path,
-        0f,
-        textRiseFraction * (smallTextBaseLine - baseline),
-        paint
-      )
+    if (canvas == null) {
+      return
+    }
 
-      // 绘制线
-      paint.strokeWidth = 1.dp
-      paint.style = Paint.Style.STROKE
-      val lineY = baseline + lineOffset
-      if (showLineFraction == 1f && hideLineFraction == 0f) {
-        paint.color = lineAccentColor
-      } else {
-        paint.color = lineColor
-      }
-      val lineControlPointY = when {
-        rise -> {
-          lineY + lineShakeOffset
-        }
-        else -> lineY + pullDegree
-      }
-      path.reset()
-      path.moveTo(textMargin, lineY)
-      path.quadTo(width / 2f, lineControlPointY, (width - paddingRight).toFloat(), lineY)
-      canvas.drawPath(path, paint)
+    // 绘制 hint 文字
+    paint.color = smallTextColor
+    paint.style = Paint.Style.FILL
+    paint.textSize = textSize - textRiseFraction * (textSize - smallTextSize)
+    val textControlPotionY = when (expandState) {
+      ExpandState.TEXT_RISE -> baseline + linePullDegree * (1 - textRiseFraction)
+      ExpandState.PULL_LINE-> baseline + linePullDegree
+      else -> baseline.toFloat()
+    }
+    val x2 = (width - paddingRight).toFloat()
+    val vOffset = textRiseFraction * (smallTextBaseLine - baseline)
+    path.reset()
+    path.moveTo(textMargin, baseline.toFloat())
+    path.quadTo(width / 2f, textControlPotionY, x2, baseline.toFloat())
+    canvas.drawTextOnPath(hint.toString(), path, 0f, vOffset, paint)
 
-      // 绘制高亮线
-      val lineLength = width - textMargin - paddingRight
-      paint.color = lineAccentColor
-      if (showLineFraction <= 1 && showLineFraction > 0) {
-        if (showLineFraction == 1f) {
-          if (hideLineFraction > 0) {
-            canvas.drawLine(
-              textMargin + lineLength * hideLineFraction, lineY,
-              width - paddingRight.toFloat(), lineY, paint
-            )
-          }
-        } else {
-          canvas.drawLine(
-            width / 2 - lineLength * showLineFraction / 2, lineY,
-            width / 2 + lineLength * showLineFraction / 2, lineY, paint
-          )
-        }
+    // 绘制抖动线
+    paint.strokeWidth = 1.dp
+    paint.style = Paint.Style.STROKE
+    paint.color = when (expandState) {
+      ExpandState.PULL_LINE,
+      ExpandState.TEXT_RISE,
+      ExpandState.EXPANDED -> lineAccentColor
+      else -> lineColor
+    }
+    val lineY = baseline + lineOffset
+    val lineControlPointY = when (expandState) {
+      ExpandState.TEXT_RISE -> lineY + lineShakeOffset
+      else -> lineY + linePullDegree
+    }
+    path.reset()
+    path.moveTo(textMargin, lineY)
+    path.quadTo(width / 2f, lineControlPointY, (width - paddingRight).toFloat(), lineY)
+    canvas.drawPath(path, paint)
+
+    // 绘制高亮线
+    val lineLength = width - textMargin - paddingRight
+    paint.color = lineAccentColor
+    when (expandState) {
+      ExpandState.SHOW_HIGHLIGHT -> {
+        canvas.drawLine(
+          width / 2 - lineLength * showLineFraction / 2, lineY,
+          width / 2 + lineLength * showLineFraction / 2, lineY, paint
+        )
+      }
+      ExpandState.HIDE_HIGHLIGHT -> {
+        canvas.drawLine(
+          textMargin + lineLength * showLineFraction, lineY,
+          width - paddingRight.toFloat(), lineY, paint
+        )
+      }
+      else -> {
       }
     }
   }
 
-  override fun performLongClick(): Boolean {
-    return try {
-      super.performLongClick()
-    } catch (e: NullPointerException) {
-      true
+  private fun setEditable(editable: Boolean) {
+    if (editable) {
+      inputType = realInputType
+      filters = arrayOf()
+    } else {
+      inputType = InputType.TYPE_NULL
+      filters = arrayOf(nonInputFilter)
     }
   }
 
-  override fun performLongClick(x: Float, y: Float): Boolean {
-    return try {
-      super.performLongClick(x, y)
-    } catch (e: NullPointerException) {
-      true
-    }
+  override fun setInputType(type: Int) {
+    super.setInputType(type)
   }
+
+}
+
+enum class ExpandState {
+  NORMAL, SHOW_HIGHLIGHT, PULL_LINE, TEXT_RISE, EXPANDED, HIDE_HIGHLIGHT, TEXT_DROP
 }

@@ -8,24 +8,24 @@
   android:orientation="vertical"
   tools:context=".MainActivity">
 
-  <com.dylanc.materialedittext.MaterialEditText2
+  <com.dylanc.materialedittext.MaterialEditText
     android:id="@+id/edt"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:hint="UserName"/>
 
-  <EditText
+  <com.dylanc.materialedittext.MaterialEditText
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginTop="8dp"
     android:inputType="textPassword"
     android:hint="Password"/>
 
-<!--  <com.dylanc.materialedittext.MaterialEditText-->
-<!--    android:layout_width="match_parent"-->
-<!--    android:layout_height="wrap_content"-->
-<!--    android:layout_marginTop="8dp"-->
-<!--    android:inputType="textPassword"-->
-<!--    android:hint="Code"/>-->
+  <com.dylanc.materialedittext.MaterialEditText
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="8dp"
+    android:inputType="textPassword"
+    android:hint="Code"/>
 
 </LinearLayout>
