@@ -13,9 +13,13 @@ import android.text.InputFilter
 import android.text.InputType
 import android.text.TextUtils
 import android.util.AttributeSet
+import android.util.Log
 import android.view.View
 import android.view.animation.BounceInterpolator
 import androidx.appcompat.widget.AppCompatEditText
+import androidx.core.animation.doOnEnd
+import androidx.core.animation.doOnStart
+import kotlin.math.log
 
 class MaterialEditText(context: Context, attrs: AttributeSet) :
   AppCompatEditText(context, attrs), View.OnFocusChangeListener {
@@ -31,8 +35,8 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
   private var lineAccentColor = 0
   private val lineMaxShakeOffset = 15.dp
   private val lineOffset = 12.dp
-  private var expandState = ExpandState.NORMAL
-  private var realInputType: Int
+  private var state = State.NORMAL
+  private var initialInputType: Int
 
   private lateinit var highlightAnimator: ObjectAnimator
   private lateinit var pullLineAnimator: ObjectAnimator
@@ -48,6 +52,7 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
       field = value
       invalidate()
     }
+
   private var linePullDegree = 0f
     set(value) {
       field = value
@@ -76,7 +81,7 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
     )
     lineAccentColor = context.accentColor
     onFocusChangeListener = this
-    realInputType = inputType
+    initialInputType = inputType
     initAnimator()
   }
 
@@ -84,82 +89,65 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
     highlightAnimator = ObjectAnimator.ofFloat(this, "showLineFraction", 1f)
       .apply {
         duration = 500
-        addListener(object : AnimatorListenerAdapter() {
-          override fun onAnimationStart(animation: Animator?) {
-            expandState = ExpandState.SHOW_HIGHLIGHT
-          }
-        })
+        state = State.SHOW_HIGHLIGHT
       }
     pullLineAnimator = ObjectAnimator.ofFloat(this, "linePullDegree", lineMaxShakeOffset * 2)
       .apply {
-        addListener(object : AnimatorListenerAdapter() {
-          override fun onAnimationStart(animation: Animator?) {
-            expandState = ExpandState.PULL_LINE
-          }
-        })
+        state = State.PULL_LINE
       }
     textFloatAnimator = ObjectAnimator.ofFloat(this, "textRiseFraction", 1f)
       .apply {
-        addListener(object : AnimatorListenerAdapter() {
-          override fun onAnimationStart(animation: Animator?) {
-            expandState = ExpandState.TEXT_RISE
-          }
-        })
+        state = State.TEXT_RISE
       }
     val lineShakeAnimator =
       ObjectAnimator.ofFloat(
         this, "lineShakeOffset",
         lineMaxShakeOffset * 2, (-20).dp, 0f, 8.dp, 0.dp
       ).apply { duration = 400 }
-    riseAnimatorSet = AnimatorSet()
-      .apply {
-        playTogether(textFloatAnimator, lineShakeAnimator)
-      }
-    focusedAnimatorSet = AnimatorSet()
-      .apply {
-        playSequentially(highlightAnimator, pullLineAnimator, riseAnimatorSet)
-      }
-    loseFocusAnimatorSet = AnimatorSet()
-      .apply {
-        playSequentially(highlightAnimator, textFloatAnimator)
-        addListener(object : AnimatorListenerAdapter() {
-          override fun onAnimationEnd(animation: Animator?) {
-            super.onAnimationEnd(animation)
-            expandState = ExpandState.NORMAL
-          }
-        })
-      }
+    riseAnimatorSet = animatorSetOf {
+      playTogether(textFloatAnimator, lineShakeAnimator)
+    }
+    focusedAnimatorSet = animatorSetOf {
+      playSequentially(highlightAnimator, pullLineAnimator, riseAnimatorSet)
+    }
+    loseFocusAnimatorSet = animatorSetOf {
+      playSequentially(highlightAnimator, textFloatAnimator)
+      addListener(object : AnimatorListenerAdapter() {
+        override fun onAnimationEnd(animation: Animator?) {
+          super.onAnimationEnd(animation)
+          this@MaterialEditText.state = State.NORMAL
+        }
+      })
+    }
   }
 
   override fun onFocusChange(v: View?, hasFocus: Boolean) {
     if (hasFocus) {
       setEditable(true)
-      when (expandState) {
-        ExpandState.NORMAL -> {
+      when (state) {
+        State.NORMAL -> {
           if (!TextUtils.isEmpty(text)) {
             highlightAnimator.setFloatValues(0f, 1f)
-            highlightAnimator.listeners?.clear()
-            highlightAnimator.addListener(object : AnimatorListenerAdapter() {
-              override fun onAnimationStart(animation: Animator?) {
-                expandState = ExpandState.SHOW_HIGHLIGHT
-              }
-
-              override fun onAnimationEnd(animation: Animator?) {
-                linePullDegree = 0f
-                expandState = ExpandState.EXPANDED
-              }
-            })
+            highlightAnimator.state = State.SHOW_HIGHLIGHT
+            highlightAnimator.nextState = State.SELECTED
+            highlightAnimator.doOnEnd {
+              linePullDegree = 0f
+            }
             highlightAnimator.start()
           } else {
-            setShowHighlightAnimator()
-            setTextRiseAnimator()
+            highlightAnimator.setFloatValues(0f, 1f)
+            highlightAnimator.state = State.SHOW_HIGHLIGHT
+            textFloatAnimator.setFloatValues(0f, 1f)
+            textFloatAnimator.duration = 300
+            textFloatAnimator.interpolator = null
+            textFloatAnimator.state = State.TEXT_RISE
             setEditable(false)
             focusedAnimatorSet.listeners?.clear()
             focusedAnimatorSet.addListener(object : AnimatorListenerAdapter() {
               override fun onAnimationEnd(animation: Animator?) {
                 super.onAnimationEnd(animation)
                 linePullDegree = 0f
-                expandState = ExpandState.EXPANDED
+                state = State.SELECTED
                 setEditable(true)
                 showKeyboard()
               }
@@ -167,28 +155,27 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
             focusedAnimatorSet.start()
           }
         }
-        ExpandState.HIDE_HIGHLIGHT -> {
+        State.HIDE_HIGHLIGHT -> {
           loseFocusAnimatorSet.end()
           textRiseFraction = 1f
           highlightAnimator.addListener(object : AnimatorListenerAdapter() {
             override fun onAnimationEnd(animation: Animator?) {
               linePullDegree = 0f
-              expandState = ExpandState.EXPANDED
+              state = State.SELECTED
             }
           })
           highlightAnimator.reverse()
         }
-        ExpandState.TEXT_DROP -> {
-          loseFocusAnimatorSet.end()
-          textRiseFraction = textRiseFraction
+        State.TEXT_DROP -> {
+          loseFocusAnimatorSet.cancel()
           AnimatorSet().apply {
-            textFloatAnimator.setFloatValues(textRiseFraction, 1f)
+            textFloatAnimator.setFloatValues(textFloatAnimator.animatedValue as Float, 1f)
             highlightAnimator.setFloatValues(1f, 0f)
             playSequentially(textFloatAnimator, highlightAnimator)
             addListener(object : AnimatorListenerAdapter() {
               override fun onAnimationEnd(animation: Animator?) {
                 linePullDegree = 0f
-                expandState = ExpandState.EXPANDED
+                this@MaterialEditText.state = State.SELECTED
               }
             })
           }.start()
@@ -198,17 +185,17 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
       }
 
     } else {
-      when (expandState) {
-        ExpandState.SHOW_HIGHLIGHT -> {
+      when (state) {
+        State.SHOW_HIGHLIGHT -> {
           stopFocusedAnimation()
           highlightAnimator.addListener(object : AnimatorListenerAdapter() {
             override fun onAnimationEnd(animation: Animator?) {
-              expandState = ExpandState.NORMAL
+              state = State.NORMAL
             }
           })
           highlightAnimator.reverse()
         }
-        ExpandState.PULL_LINE -> {
+        State.PULL_LINE -> {
           stopFocusedAnimation()
           AnimatorSet().apply {
             pullLineAnimator.setFloatValues(linePullDegree, 0f)
@@ -216,41 +203,36 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
             playSequentially(pullLineAnimator, highlightAnimator)
             addListener(object : AnimatorListenerAdapter() {
               override fun onAnimationEnd(animation: Animator?) {
-                expandState = ExpandState.NORMAL
+                this@MaterialEditText.state = State.NORMAL
               }
             })
           }.start()
         }
-        ExpandState.TEXT_RISE -> {
-          textFloatAnimator.setFloatValues(0f, 1f, 0f)
-          textFloatAnimator.duration = 600
-          textFloatAnimator.interpolator = BounceInterpolator()
+        State.TEXT_RISE -> {
+          textFloatAnimator.setFloatValues(textRiseFraction, 0f)
+          state = State.TEXT_DROP
+//          textFloatAnimator.duration = 600
+//          textFloatAnimator.interpolator = BounceInterpolator()
           focusedAnimatorSet.listeners?.clear()
           focusedAnimatorSet.addListener(object : AnimatorListenerAdapter() {
             override fun onAnimationEnd(animation: Animator?) {
               textFloatAnimator.interpolator = null
-              expandState = ExpandState.NORMAL
+              state = State.NORMAL
               linePullDegree = 0f
             }
           })
         }
-        ExpandState.EXPANDED -> {
-          if (!TextUtils.isEmpty(text)) {
+        State.SELECTED -> {
+          if (!text.isNullOrBlank()) {
             highlightAnimator.setFloatValues(0f, 1f)
-            highlightAnimator.listeners?.clear()
-            highlightAnimator.addListener(object : AnimatorListenerAdapter() {
-              override fun onAnimationStart(animation: Animator?) {
-                expandState = ExpandState.HIDE_HIGHLIGHT
-              }
-
-              override fun onAnimationEnd(animation: Animator?) {
-                expandState = ExpandState.NORMAL
-              }
-            })
+            highlightAnimator.state = State.HIDE_HIGHLIGHT
+            highlightAnimator.nextState = State.NORMAL
             highlightAnimator.start()
           } else {
-            setHideHighlightAnimator()
-            setTextDropAnimator()
+            highlightAnimator.setFloatValues(0f, 1f)
+            highlightAnimator.state = State.HIDE_HIGHLIGHT
+            textFloatAnimator.setFloatValues(1f, 0f)
+            textFloatAnimator.state = State.TEXT_DROP
             loseFocusAnimatorSet.start()
           }
         }
@@ -263,53 +245,7 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
   private fun stopFocusedAnimation() {
     focusedAnimatorSet.listeners?.clear()
     focusedAnimatorSet.cancel()
-    textRiseFraction = if (TextUtils.isEmpty(text)) {
-      0f
-    } else {
-      1f
-    }
-  }
-
-  private fun setShowHighlightAnimator() {
-    highlightAnimator.setFloatValues(0f, 1f)
-    highlightAnimator.listeners?.clear()
-    highlightAnimator.addListener(object : AnimatorListenerAdapter() {
-      override fun onAnimationStart(animation: Animator?) {
-        expandState = ExpandState.SHOW_HIGHLIGHT
-      }
-    })
-  }
-
-  private fun setHideHighlightAnimator() {
-    highlightAnimator.setFloatValues(0f, 1f)
-    highlightAnimator.listeners?.clear()
-    highlightAnimator.addListener(object : AnimatorListenerAdapter() {
-      override fun onAnimationStart(animation: Animator?) {
-        expandState = ExpandState.HIDE_HIGHLIGHT
-      }
-    })
-  }
-
-  private fun setTextRiseAnimator() {
-    textFloatAnimator.setFloatValues(0f, 1f)
-    textFloatAnimator.duration = 300
-    textFloatAnimator.listeners?.clear()
-    textFloatAnimator.interpolator = null
-    textFloatAnimator.addListener(object : AnimatorListenerAdapter() {
-      override fun onAnimationStart(animation: Animator?) {
-        expandState = ExpandState.TEXT_RISE
-      }
-    })
-  }
-
-  private fun setTextDropAnimator() {
-    textFloatAnimator.setFloatValues(1f, 0f)
-    textFloatAnimator.listeners?.clear()
-    textFloatAnimator.addListener(object : AnimatorListenerAdapter() {
-      override fun onAnimationStart(animation: Animator?) {
-        expandState = ExpandState.TEXT_DROP
-      }
-    })
+    textRiseFraction = if (text.isNullOrBlank()) 0f else 1f
   }
 
   override fun onDraw(canvas: Canvas?) {
@@ -322,13 +258,18 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
     paint.color = smallTextColor
     paint.style = Paint.Style.FILL
     paint.textSize = textSize - textRiseFraction * (textSize - smallTextSize)
-    val textControlPotionY = when (expandState) {
-      ExpandState.TEXT_RISE -> baseline + linePullDegree * (1 - textRiseFraction)
-      ExpandState.PULL_LINE-> baseline + linePullDegree
+    val textControlPotionY = when (state) {
+      State.TEXT_RISE -> baseline + lineMaxShakeOffset * (1 - textRiseFraction)
+      State.TEXT_DROP -> baseline + lineMaxShakeOffset * textRiseFraction
+      State.PULL_LINE -> baseline + linePullDegree
       else -> baseline.toFloat()
     }
     val x2 = (width - paddingRight).toFloat()
     val vOffset = textRiseFraction * (smallTextBaseLine - baseline)
+//    val vOffset = when (state) {
+//      State.TEXT_DROP -> (1 - textRiseFraction) * (smallTextBaseLine - baseline)
+//      else -> textRiseFraction * (smallTextBaseLine - baseline)
+//    }
     path.reset()
     path.moveTo(textMargin, baseline.toFloat())
     path.quadTo(width / 2f, textControlPotionY, x2, baseline.toFloat())
@@ -337,16 +278,17 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
     // 绘制抖动线
     paint.strokeWidth = 1.dp
     paint.style = Paint.Style.STROKE
-    paint.color = when (expandState) {
-      ExpandState.PULL_LINE,
-      ExpandState.TEXT_RISE,
-      ExpandState.EXPANDED -> lineAccentColor
+    paint.color = when (state) {
+      State.PULL_LINE,
+      State.TEXT_RISE,
+      State.SELECTED -> lineAccentColor
       else -> lineColor
     }
     val lineY = baseline + lineOffset
-    val lineControlPointY = when (expandState) {
-      ExpandState.TEXT_RISE -> lineY + lineShakeOffset
-      else -> lineY + linePullDegree
+    val lineControlPointY = when (state) {
+      State.TEXT_RISE -> lineY + lineShakeOffset
+      State.PULL_LINE -> lineY + linePullDegree
+      else -> lineY
     }
     path.reset()
     path.moveTo(textMargin, lineY)
@@ -356,14 +298,14 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
     // 绘制高亮线
     val lineLength = width - textMargin - paddingRight
     paint.color = lineAccentColor
-    when (expandState) {
-      ExpandState.SHOW_HIGHLIGHT -> {
+    when (state) {
+      State.SHOW_HIGHLIGHT -> {
         canvas.drawLine(
           width / 2 - lineLength * showLineFraction / 2, lineY,
           width / 2 + lineLength * showLineFraction / 2, lineY, paint
         )
       }
-      ExpandState.HIDE_HIGHLIGHT -> {
+      State.HIDE_HIGHLIGHT -> {
         canvas.drawLine(
           textMargin + lineLength * showLineFraction, lineY,
           width - paddingRight.toFloat(), lineY, paint
@@ -376,7 +318,7 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
 
   private fun setEditable(editable: Boolean) {
     if (editable) {
-      inputType = realInputType
+      inputType = initialInputType
       filters = arrayOf()
     } else {
       inputType = InputType.TYPE_NULL
@@ -384,12 +326,30 @@ class MaterialEditText(context: Context, attrs: AttributeSet) :
     }
   }
 
-  override fun setInputType(type: Int) {
-    super.setInputType(type)
+  private fun animatorSetOf(block: AnimatorSet.() -> Unit) =
+    AnimatorSet().apply(block)
+
+  private var Animator.state: State
+    @Deprecated("Property does not have a getter", level = DeprecationLevel.ERROR)
+    get() = throw NotImplementedError()
+    set(value) {
+      listeners?.clear()
+      doOnStart {
+        this@MaterialEditText.state = value
+      }
+    }
+
+  private var Animator.nextState: State
+    @Deprecated("Property does not have a getter", level = DeprecationLevel.ERROR)
+    get() = throw NotImplementedError()
+    set(value) {
+      doOnEnd {
+        this@MaterialEditText.state = value
+      }
+    }
+
+  enum class State {
+    NORMAL, SHOW_HIGHLIGHT, PULL_LINE, TEXT_RISE, SELECTED, HIDE_HIGHLIGHT, TEXT_DROP
   }
 
-}
-
-enum class ExpandState {
-  NORMAL, SHOW_HIGHLIGHT, PULL_LINE, TEXT_RISE, EXPANDED, HIDE_HIGHLIGHT, TEXT_DROP
 }
