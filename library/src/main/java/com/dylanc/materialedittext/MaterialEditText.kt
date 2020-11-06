@@ -13,13 +13,10 @@ import android.text.InputFilter
 import android.text.InputType
 import android.text.TextUtils
 import android.util.AttributeSet
-import android.util.Log
 import android.view.View
-import android.view.animation.BounceInterpolator
 import androidx.appcompat.widget.AppCompatEditText
 import androidx.core.animation.doOnEnd
 import androidx.core.animation.doOnStart
-import kotlin.math.log
 
 class MaterialEditText(context: Context, attrs: AttributeSet) :
   AppCompatEditText(context, attrs), View.OnFocusChangeListener {
